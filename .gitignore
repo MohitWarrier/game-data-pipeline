@@ -1,0 +1,39 @@
+# environment
+.env
+*.env
+
+# python
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# duckdb
+data/*.duckdb
+
+# dbt
+dbt_packages/
+target/
+logs/
+.dbt/
+
+# evidence
+dashboard/node_modules/
+dashboard/.evidence/
+
+# os
+.DS_Store
+Thumbs.db
+
+# claude code
+.claude/
+
+# md files apart from README.md
+/docs/
+
+# dbt project
+game_pulse/target/
+game_pulse/logs/
+game_pulse/dbt_packages/

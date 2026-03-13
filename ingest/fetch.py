@@ -51,7 +51,7 @@ def fetch_top_games(token):
     return df
 
 def save_to_duckdb(df):
-    con = duckdb.connect("/workspaces/game-data-pipeline/data/game_pulse.duckdb")
+    con = duckdb.connect("data/game_pulse.duckdb")
     con.execute("""
         CREATE TABLE IF NOT EXISTS raw_twitch_games (
             id VARCHAR,
