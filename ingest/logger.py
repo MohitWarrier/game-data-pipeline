@@ -1,5 +1,18 @@
 import logging
 import os
+from datetime import datetime, timezone, timedelta
+
+IST = timezone(timedelta(hours=5, minutes=30))
+
+
+class ISTFormatter(logging.Formatter):
+    """Format all log timestamps in IST (UTC+5:30)."""
+
+    def formatTime(self, record, datefmt=None):
+        dt = datetime.fromtimestamp(record.created, tz=IST)
+        if datefmt:
+            return dt.strftime(datefmt)
+        return dt.strftime("%d/%m/%y %H:%M:%S")
 
 
 def get_logger(name):
@@ -9,9 +22,9 @@ def get_logger(name):
     if logger.handlers:
         return logger
 
-    formatter = logging.Formatter(
-        "%(asctime)s | %(name)s | %(levelname)s | %(message)s",
-        datefmt="%Y-%m-%d %H:%M:%S",
+    formatter = ISTFormatter(
+        "%(asctime)s IST | %(name)s | %(levelname)s | %(message)s",
+        datefmt="%d/%m/%y %H:%M:%S",
     )
 
     console = logging.StreamHandler()
@@ -24,3 +37,8 @@ def get_logger(name):
     logger.addHandler(file_handler)
 
     return logger
+
+
+def now_ist():
+    """Get current time in IST. Use this everywhere instead of datetime.now()."""
+    return datetime.now(IST)

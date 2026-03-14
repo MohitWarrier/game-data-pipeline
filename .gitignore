@@ -12,6 +12,7 @@ __pycache__/
 
 # duckdb
 data/*.duckdb
+data/*.duckdb.wal
 
 # dbt
 dbt_packages/
