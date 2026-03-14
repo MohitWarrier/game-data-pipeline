@@ -6,3 +6,5 @@ SELECT
     CAST(stream_count AS INTEGER) AS stream_count,
     CAST(fetched_at AS TIMESTAMP) AS fetched_at
 FROM raw_twitch_games
+WHERE name NOT IN ('Just Chatting', 'IRL')
+  AND (igdb_id IS NOT NULL AND igdb_id != '')

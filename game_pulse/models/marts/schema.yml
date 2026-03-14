@@ -1,0 +1,29 @@
+version: 2
+
+models:
+  - name: dim_games
+    description: "Game dimension combining Twitch, IGDB, and Steam identifiers with metadata."
+    columns:
+      - name: game_id
+        tests:
+          - not_null
+          - unique
+      - name: game_name
+        tests:
+          - not_null
+
+  - name: fact_game_snapshots
+    description: "Time-series fact table of game rankings, viewer counts, and metadata per snapshot."
+    columns:
+      - name: game_id
+        tests:
+          - not_null
+      - name: fetched_at
+        tests:
+          - not_null
+      - name: viewer_count
+        tests:
+          - not_null
+      - name: rank_at_time
+        tests:
+          - not_null

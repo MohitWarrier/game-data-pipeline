@@ -1,0 +1,9 @@
+duckdb
+pandas
+requests
+python-dotenv
+prefect
+dbt-core
+dbt-duckdb
+streamlit
+plotly

@@ -1,0 +1,39 @@
+version: 2
+
+models:
+  - name: stg_twitch_games
+    description: "Cleaned Twitch top games with viewer and stream counts. Non-game categories filtered out."
+    columns:
+      - name: game_id
+        tests:
+          - not_null
+      - name: game_name
+        tests:
+          - not_null
+      - name: igdb_id
+        tests:
+          - not_null
+      - name: fetched_at
+        tests:
+          - not_null
+
+  - name: stg_igdb_games
+    description: "IGDB game metadata — one row per game."
+    columns:
+      - name: igdb_id
+        tests:
+          - not_null
+          - unique
+      - name: game_name
+        tests:
+          - not_null
+
+  - name: stg_steam_players
+    description: "Steam concurrent player counts per game per snapshot."
+    columns:
+      - name: steam_app_id
+        tests:
+          - not_null
+      - name: fetched_at
+        tests:
+          - not_null
