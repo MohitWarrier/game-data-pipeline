@@ -78,6 +78,19 @@ archive-days:
 dashboard:
 	streamlit run dashboard/app.py
 
+# --- Start Everything ---
+
+# Run pipeline once, then launch dashboard (one command to go from zero to running)
+start:
+	python pipelines/pipeline.py
+	streamlit run dashboard/app.py
+
+# Run pipeline once, validate, then launch dashboard
+start-safe:
+	python pipelines/pipeline.py
+	python -m tests.validate_pipeline --verbose
+	streamlit run dashboard/app.py
+
 # --- Debugging ---
 
 # Show recent pipeline logs
@@ -97,4 +110,4 @@ db-counts:
 	[print(f'{t}: {con.execute(f\"SELECT COUNT(*) FROM {t}\").fetchone()[0]} rows') for t in tables]; \
 	con.close()"
 
-.PHONY: run run-and-validate serve ingest dbt-run dbt-test dbt validate validate-relaxed archive-dry-run archive archive-days dashboard logs db-check db-counts
+.PHONY: run run-and-validate serve ingest dbt-run dbt-test dbt validate validate-relaxed archive-dry-run archive archive-days dashboard start start-safe logs db-check db-counts
