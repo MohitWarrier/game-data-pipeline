@@ -129,6 +129,24 @@ def test_steam_ingest():
 def test_dbt_models():
     """dbt run creates all models without errors."""
     import subprocess
+
+    # ensure all raw tables exist (smoke test skips igdb/steam ingest)
+    con = duckdb.connect(DB_PATH)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS raw_igdb_games (
+            igdb_id VARCHAR, name VARCHAR, genre VARCHAR,
+            release_year VARCHAR, developer VARCHAR,
+            steam_app_id VARCHAR, fetched_at VARCHAR
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS raw_steam_players (
+            steam_app_id VARCHAR, game_id VARCHAR, game_name VARCHAR,
+            player_count INTEGER, fetched_at VARCHAR
+        )
+    """)
+    con.close()
+
     result = subprocess.run(
         ["dbt", "run"], cwd="game_pulse", capture_output=True, text=True
     )

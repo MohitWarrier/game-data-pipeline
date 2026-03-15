@@ -16,11 +16,15 @@ import sys
 import json
 import time
 import subprocess
-from prefect import flow, task
+from datetime import timedelta
 
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
+# suppress Prefect's duplicate logging — we have our own logger
+os.environ["PREFECT_LOGGING_LEVEL"] = "WARNING"
+
+from prefect import flow, task
 from ingest.logger import get_logger, now_ist
 from ingest.config import load_config
 from ingest.notify import send_alert
@@ -120,10 +124,11 @@ def run_validation():
 # ============================================================
 
 @flow(name="game-pulse")
-def pipeline():
+def pipeline(trigger="manual"):
     run_start = now_ist()
+    trigger_label = {"scheduled": "SCHEDULED", "manual": "MANUAL", "dashboard": "DASHBOARD"}.get(trigger, "MANUAL")
     logger.info("=" * 60)
-    logger.info("PIPELINE RUN STARTED")
+    logger.info(f"{trigger_label} PIPELINE RUN STARTED")
     logger.info(f"  Time: {fmt(run_start)} IST")
     logger.info("=" * 60)
 
@@ -183,6 +188,7 @@ def pipeline():
         "finished_at": fmt(run_end),
         "duration_sec": duration,
         "overall_status": overall,
+        "trigger": trigger_label.lower(),
         "steps": steps,
         "validation": validation,
     }
@@ -208,6 +214,13 @@ def pipeline():
 # ============================================================
 
 if __name__ == "__main__":
+    # parse --trigger flag (used by dashboard button)
+    cli_trigger = "manual"
+    if "--trigger" in sys.argv:
+        idx = sys.argv.index("--trigger")
+        if idx + 1 < len(sys.argv):
+            cli_trigger = sys.argv[idx + 1]
+
     if "--serve" in sys.argv:
         interval = 30
         logger.info(f"Pipeline scheduler started (runs every {interval} min)")
@@ -215,17 +228,17 @@ if __name__ == "__main__":
 
         # run immediately
         try:
-            pipeline()
+            pipeline(trigger="scheduled")
         except Exception as e:
             logger.error(f"Initial run failed: {e}")
 
         # then loop
         while True:
-            next_run = now_ist().strftime("%d/%m/%y %H:%M IST")
-            logger.info(f"Next run in {interval} min (around {next_run}+{interval}m). Ctrl+C to stop.")
+            next_time = (now_ist() + timedelta(minutes=interval)).strftime("%d/%m/%y %H:%M IST")
+            logger.info(f"Next run at {next_time}. Ctrl+C to stop.")
             try:
                 time.sleep(interval * 60)
-                pipeline()
+                pipeline(trigger="scheduled")
             except KeyboardInterrupt:
                 logger.info("Pipeline stopped by user")
                 break
@@ -233,5 +246,5 @@ if __name__ == "__main__":
                 logger.error(f"Pipeline run failed: {e}")
                 logger.info("Will retry at next interval")
     else:
-        logger.info("Running pipeline once")
-        pipeline()
+        logger.info(f"Running pipeline once ({cli_trigger})")
+        pipeline(trigger=cli_trigger)
