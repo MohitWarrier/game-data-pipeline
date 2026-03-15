@@ -20,6 +20,7 @@ import os
 import smtplib
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
+from dotenv import load_dotenv
 from ingest.logger import get_logger
 
 logger = get_logger("notify")
@@ -27,6 +28,7 @@ logger = get_logger("notify")
 
 def _get_email_config():
     """Load email config from environment. Returns None if not configured."""
+    load_dotenv()
     email_from = os.getenv("ALERT_EMAIL_FROM")
     app_password = os.getenv("ALERT_EMAIL_APP_PASSWORD")
     email_to = os.getenv("ALERT_EMAIL_TO")
@@ -42,41 +44,80 @@ def _get_email_config():
 
 
 def _build_email_body(report):
-    """Build a readable failure report for the email body."""
+    """Build a detailed failure report for the email body."""
+    status = report["overall_status"].upper()
     lines = []
-    lines.append(f"Pipeline run at {report['started_at']} IST finished with status: {report['overall_status'].upper()}")
-    lines.append(f"Duration: {report['duration_sec']}s")
+
+    # header
+    lines.append("=" * 50)
+    lines.append(f"  GAME PULSE PIPELINE — {status}")
+    lines.append("=" * 50)
+    lines.append("")
+    lines.append(f"  Started:   {report['started_at']} IST")
+    lines.append(f"  Finished:  {report.get('finished_at', '?')} IST")
+    lines.append(f"  Duration:  {report['duration_sec']}s")
     lines.append("")
 
-    # step breakdown
-    lines.append("Step Breakdown:")
-    lines.append("-" * 40)
+    # step-by-step results
+    lines.append("-" * 50)
+    lines.append("  STEP RESULTS")
+    lines.append("-" * 50)
+
     for step in report.get("steps", []):
-        status = step["status"].upper()
+        name = step["step"].upper()
+        s = step["status"]
         duration = step.get("duration_sec", "?")
         rows = step.get("rows", "")
-        row_info = f" ({rows} rows)" if rows != "" else ""
-        error = step.get("error", "")
 
-        if status == "SUCCESS":
-            lines.append(f"  {step['step']:<10} OK     {duration}s{row_info}")
+        if s == "success":
+            row_info = f" | {rows} rows" if rows != "" else ""
+            dbt_info = ""
+            if step.get("dbt_tests_passed") is False:
+                dbt_info = " | dbt tests FAILED"
+            elif step.get("dbt_tests_passed") is True:
+                dbt_info = " | dbt tests passed"
+            lines.append(f"  [OK]     {name:<10} {duration}s{row_info}{dbt_info}")
         else:
-            lines.append(f"  {step['step']:<10} FAILED {duration}s")
-            lines.append(f"             Error: {error}")
+            lines.append(f"  [FAILED] {name:<10} {duration}s")
+            error = step.get("error", "unknown")
+            # wrap long errors
+            if len(error) > 80:
+                lines.append(f"           {error[:80]}")
+                lines.append(f"           {error[80:]}")
+            else:
+                lines.append(f"           {error}")
     lines.append("")
 
-    # validation
+    # validation results
     val = report.get("validation", {})
     passed = val.get("passed", 0)
     failed = val.get("failed_count", 0)
-    lines.append(f"Validation: {passed} passed, {failed} failed")
+    total = passed + failed
+
+    lines.append("-" * 50)
+    lines.append("  VALIDATION")
+    lines.append("-" * 50)
+    if total > 0:
+        lines.append(f"  {passed}/{total} checks passed")
+    else:
+        lines.append("  No validation ran")
 
     if val.get("failed_checks"):
         lines.append("")
-        lines.append("Failed Checks:")
-        lines.append("-" * 40)
         for fc in val["failed_checks"]:
-            lines.append(f"  {fc['check']}: {fc['detail']}")
+            lines.append(f"  [FAIL] {fc['check']}")
+            lines.append(f"         {fc['detail']}")
+    lines.append("")
+
+    # what to do
+    lines.append("-" * 50)
+    lines.append("  WHAT TO DO")
+    lines.append("-" * 50)
+    lines.append("  1. Check dashboard Pipeline tab for details")
+    lines.append("  2. Run: make logs")
+    lines.append("  3. Run: make validate")
+    lines.append("  4. Check logs/runs/latest.json for full report")
+    lines.append("")
 
     return "\n".join(lines)
 

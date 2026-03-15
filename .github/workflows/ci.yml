@@ -1,6 +1,5 @@
 name: CI
 
-# Run on every push to main and on pull requests
 on:
   push:
     branches: [main]
@@ -29,6 +28,20 @@ jobs:
         run: |
           echo "TWITCH_CLIENT_ID=${{ secrets.TWITCH_CLIENT_ID }}" >> .env
           echo "TWITCH_CLIENT_SECRET=${{ secrets.TWITCH_CLIENT_SECRET }}" >> .env
+
+      - name: Set up data directory and dbt profile
+        run: |
+          mkdir -p data
+          mkdir -p ~/.dbt
+          cat > ~/.dbt/profiles.yml << 'EOF'
+          game_pulse:
+            outputs:
+              dev:
+                type: duckdb
+                path: data/game_pulse.duckdb
+                threads: 1
+            target: dev
+          EOF
 
       - name: Run smoke tests
         run: python -m tests.test_pipeline --test smoke
