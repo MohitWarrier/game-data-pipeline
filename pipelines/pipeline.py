@@ -13,6 +13,7 @@ Usage:
 
 import os
 import sys
+import io
 import json
 import time
 import subprocess
@@ -21,16 +22,26 @@ from datetime import timedelta
 PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, PROJECT_ROOT)
 
-# suppress Prefect's duplicate logging — we have our own logger
+# suppress Prefect's duplicate logging — we have our own logger.
+# Must set BOTH the env var AND disable Prefect's log interception.
 os.environ["PREFECT_LOGGING_LEVEL"] = "WARNING"
+os.environ["PREFECT_LOGGING_EXTRA_LOGGERS"] = ""
 
 from prefect import flow, task
 
-# Prefect hooks into Python's logging and duplicates every line.
-# Silence all prefect loggers so only our custom logger writes output.
-import logging
-for _name in ["prefect", "prefect.flow_runs", "prefect.task_runs"]:
-    logging.getLogger(_name).setLevel(logging.WARNING)
+# Nuclear: silence every Prefect logger and prevent propagation
+import logging as _logging
+for _name in list(_logging.Logger.manager.loggerDict):
+    if _name.startswith("prefect"):
+        _l = _logging.getLogger(_name)
+        _l.setLevel(_logging.CRITICAL)
+        _l.propagate = False
+        _l.handlers = []
+# Also catch the root prefect logger
+_pl = _logging.getLogger("prefect")
+_pl.setLevel(_logging.CRITICAL)
+_pl.propagate = False
+_pl.handlers = []
 
 from ingest.logger import get_logger, now_ist
 from ingest.config import load_config
@@ -138,6 +149,13 @@ def run_validation():
 def pipeline(trigger="manual"):
     run_start = now_ist()
     trigger_label = {"scheduled": "SCHEDULED", "manual": "MANUAL", "dashboard": "DASHBOARD"}.get(trigger, "MANUAL")
+
+    # capture all log lines for this run into a buffer
+    _log_buffer = io.StringIO()
+    _buf_handler = _logging.StreamHandler(_log_buffer)
+    _buf_handler.setFormatter(logger.handlers[0].formatter if logger.handlers else None)
+    logger.addHandler(_buf_handler)
+
     logger.info("=" * 60)
     logger.info(f"{trigger_label} PIPELINE RUN STARTED")
     logger.info(f"  Time: {fmt(run_start)} IST")
@@ -214,6 +232,11 @@ def pipeline(trigger="manual"):
         for fc in validation["failed_checks"]:
             logger.warning(f"    FAIL: {fc['check']} — {fc['detail']}")
     logger.info("=" * 60)
+
+    # capture log lines and clean up buffer handler
+    logger.removeHandler(_buf_handler)
+    report["log"] = _log_buffer.getvalue()
+    _log_buffer.close()
 
     save_run_report(report)
     send_alert(report)

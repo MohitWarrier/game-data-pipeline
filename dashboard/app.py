@@ -180,14 +180,6 @@ def load_pipeline_health():
         except Exception as e:
             info["db_error"] = str(e)
 
-    # --- full pipeline log ---
-    info["log_lines"] = []
-    try:
-        with open(LOG_PATH, "r") as f:
-            info["log_lines"] = f.readlines()
-    except FileNotFoundError:
-        pass
-
     return info
 
 
@@ -821,23 +813,22 @@ with tab_health:
 
     with btn1:
         st.caption(
-            "**Run Tests** — runs the full pipeline (ingest + dbt + validate) "
-            "AND verifies every component works. New data is fetched and saved."
+            "**Run Pipeline** — fetches fresh data from all sources, "
+            "transforms with dbt, and validates. Creates exactly one new snapshot."
         )
-        if st.button("Run Tests", use_container_width=True, type="primary"):
+        if st.button("Run Pipeline", use_container_width=True, type="primary"):
             result = run_action(
-                ["python", "-m", "tests.test_pipeline"],
-                "Run Tests (dashboard)",
+                ["python", "pipelines/pipeline.py", "--trigger", "dashboard"],
+                "Pipeline (dashboard)",
             )
             if result.returncode == 0:
-                st.success("All tests passed!")
+                st.success("Pipeline completed!")
             else:
-                st.warning("Some tests failed")
-            with st.expander("Output", expanded=True):
-                st.code(result.stdout + result.stderr, language="text")
+                st.warning("Pipeline had issues — check Run Inspector below")
             load_pipeline_health.clear()
             load_snapshots.clear()
             load_games.clear()
+            st.rerun()
 
     with btn2:
         st.caption(
@@ -853,43 +844,8 @@ with tab_health:
                 st.success("All checks passed!")
             else:
                 st.warning("Some checks failed")
-            with st.expander("Output", expanded=True):
-                st.code(result.stdout + result.stderr, language="text")
-
-    # --- last run breakdown ---
-    if latest_run:
-        st.divider()
-        st.subheader("Last Run Breakdown")
-        trigger = latest_run.get("trigger", "unknown").upper()
-        st.caption(f"[{trigger}] Run at {latest_run['started_at']} \u2014 took {latest_run['duration_sec']}s total")
-
-        steps = latest_run.get("steps", [])
-        if steps:
-            cols = st.columns(len(steps))
-            for col, step in zip(cols, steps):
-                with col:
-                    ok = step["status"] == "success"
-                    icon = "\u2705" if ok else "\u274c"
-                    label = step["step"].upper()
-                    if ok:
-                        detail = f"{step.get('duration_sec', '?')}s"
-                        if "rows" in step:
-                            detail += f" \u2022 {step['rows']} rows"
-                        if step.get("dbt_tests_passed") is False:
-                            detail += " \u2022 tests failed"
-                        st.metric(f"{icon} {label}", "OK", delta=detail, delta_color="normal")
-                    else:
-                        err = step.get("error", "unknown error")
-                        if len(err) > 60:
-                            err = err[:57] + "..."
-                        st.metric(f"{icon} {label}", "FAILED", delta=err, delta_color="inverse")
-
-        val = latest_run.get("validation", {})
-        if val.get("failed_checks"):
-            st.divider()
-            st.subheader("\u274c Failed Checks")
-            for fc in val["failed_checks"]:
-                st.error(f"**{fc['check']}** \u2014 {fc['detail']}")
+            load_pipeline_health.clear()
+            st.rerun()
 
     # --- run history ---
     runs = health.get("runs", [])
@@ -1001,10 +957,10 @@ with tab_health:
     else:
         st.warning("No tables found in database. Run the pipeline to create them.")
 
-    # --- per-run log viewer (investigation tool) ---
+    # --- run inspector (the investigation tool) ---
     st.divider()
     st.subheader("Run Inspector")
-    st.caption("Select a run to see full details — steps, timing, validation results, and errors.")
+    st.caption("Select any run to see exactly what happened — every step, every log line.")
 
     if runs:
         run_labels = []
@@ -1020,53 +976,55 @@ with tab_health:
 
         selected_run = runs[selected_idx]
 
-        # build a readable report for this run
-        lines = []
-        lines.append(f"Run started:  {selected_run['started_at']}")
-        lines.append(f"Run finished: {selected_run.get('finished_at', '?')}")
-        lines.append(f"Duration:     {selected_run.get('duration_sec', '?')}s")
-        lines.append(f"Trigger:      {selected_run.get('trigger', 'unknown').upper()}")
-        lines.append(f"Status:       {selected_run['overall_status'].upper()}")
-        lines.append("")
-        lines.append("STEPS")
-        lines.append("-" * 50)
-        for s in selected_run.get("steps", []):
-            ok = s["status"] == "success"
-            icon = "OK" if ok else "FAILED"
-            detail = f"{s.get('duration_sec', '?')}s"
-            if "rows" in s:
-                detail += f", {s['rows']} rows"
-            if s.get("dbt_tests_passed") is not None:
-                detail += f", tests={'PASS' if s['dbt_tests_passed'] else 'FAIL'}"
-            if not ok and s.get("error"):
-                detail += f"\n    Error: {s['error']}"
-            lines.append(f"  {s['step']:<12} {icon:<8} ({detail})")
+        # summary metrics for this run
+        rc1, rc2, rc3, rc4 = st.columns(4)
+        with rc1:
+            st.metric("Trigger", selected_run.get("trigger", "?").upper())
+        with rc2:
+            st.metric("Duration", f"{selected_run.get('duration_sec', '?')}s")
+        with rc3:
+            steps_ok = sum(1 for s in selected_run.get("steps", []) if s["status"] == "success")
+            steps_total = len(selected_run.get("steps", []))
+            st.metric("Steps", f"{steps_ok}/{steps_total} OK")
+        with rc4:
+            val = selected_run.get("validation", {})
+            vp = val.get("passed", 0)
+            vf = val.get("failed_count", 0)
+            st.metric("Checks", f"{vp}/{vp + vf} passed")
 
-        val = selected_run.get("validation", {})
-        lines.append("")
-        lines.append("VALIDATION")
-        lines.append("-" * 50)
-        lines.append(f"  Status:  {val.get('status', '?').upper()}")
-        lines.append(f"  Passed:  {val.get('passed', 0)}")
-        lines.append(f"  Failed:  {val.get('failed_count', 0)}")
+        # step details
+        step_list = selected_run.get("steps", [])
+        if step_list:
+            step_cols = st.columns(len(step_list))
+            for col, s in zip(step_cols, step_list):
+                with col:
+                    ok = s["status"] == "success"
+                    icon = "\u2705" if ok else "\u274c"
+                    label = s["step"].upper()
+                    if ok:
+                        detail = f"{s.get('duration_sec', '?')}s"
+                        if "rows" in s:
+                            detail += f" \u2022 {s['rows']} rows"
+                        if s.get("dbt_tests_passed") is False:
+                            detail += " \u2022 dbt tests failed"
+                        st.metric(f"{icon} {label}", "OK", delta=detail, delta_color="normal")
+                    else:
+                        err = s.get("error", "unknown")
+                        if len(err) > 60:
+                            err = err[:57] + "..."
+                        st.metric(f"{icon} {label}", "FAILED", delta=err, delta_color="inverse")
+
+        # failed checks (if any)
         if val.get("failed_checks"):
             for fc in val["failed_checks"]:
-                lines.append(f"  FAIL: {fc['check']} \u2014 {fc['detail']}")
-        if val.get("error"):
-            lines.append(f"  Error: {val['error']}")
+                st.error(f"**{fc['check']}** \u2014 {fc['detail']}")
 
-        st.code("\n".join(lines), language="text")
+        # full log for this run (from captured log lines in report)
+        run_log = selected_run.get("log", "")
+        if run_log:
+            with st.expander("Full Log for This Run", expanded=False):
+                st.code(run_log, language="text")
+        else:
+            st.caption("No captured log for this run (older runs don't have per-run logs).")
     else:
         st.info("No run reports yet. Run the pipeline to generate reports.")
-
-    # raw log (collapsed by default — for deep debugging only)
-    log_lines = health.get("log_lines", [])
-    if log_lines:
-        with st.expander(f"Raw Pipeline Log ({len(log_lines)} lines)", expanded=False):
-            log_count = st.selectbox(
-                "Lines to show", [50, 100, 200, 500, len(log_lines)],
-                format_func=lambda x: f"Last {x}" if x != len(log_lines) else f"All ({len(log_lines)})",
-                key="log_lines_count",
-            )
-            display_lines = log_lines[-log_count:]
-            st.code("".join(display_lines), language="text")
