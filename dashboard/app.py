@@ -855,14 +855,13 @@ with tab_health:
                 st.warning("Some checks failed")
             with st.expander("Output", expanded=True):
                 st.code(result.stdout + result.stderr, language="text")
-            with st.expander("Output", expanded=True):
-                st.code(result.stdout + result.stderr, language="text")
 
     # --- last run breakdown ---
     if latest_run:
         st.divider()
         st.subheader("Last Run Breakdown")
-        st.caption(f"Run at {latest_run['started_at']} \u2014 took {latest_run['duration_sec']}s total")
+        trigger = latest_run.get("trigger", "unknown").upper()
+        st.caption(f"[{trigger}] Run at {latest_run['started_at']} \u2014 took {latest_run['duration_sec']}s total")
 
         steps = latest_run.get("steps", [])
         if steps:
@@ -1002,17 +1001,72 @@ with tab_health:
     else:
         st.warning("No tables found in database. Run the pipeline to create them.")
 
-    # --- full log viewer ---
+    # --- per-run log viewer (investigation tool) ---
     st.divider()
-    st.subheader("Pipeline Log")
+    st.subheader("Run Inspector")
+    st.caption("Select a run to see full details — steps, timing, validation results, and errors.")
+
+    if runs:
+        run_labels = []
+        for r in runs:
+            trigger = r.get("trigger", "?").upper()
+            status_icon = "\u2705" if r["overall_status"] == "success" else "\u274c"
+            run_labels.append(f"{status_icon} {r['started_at']} [{trigger}] \u2014 {r['overall_status'].upper()}")
+
+        selected_idx = st.selectbox(
+            "Select a run", range(len(run_labels)),
+            format_func=lambda i: run_labels[i], key="run_inspector",
+        )
+
+        selected_run = runs[selected_idx]
+
+        # build a readable report for this run
+        lines = []
+        lines.append(f"Run started:  {selected_run['started_at']}")
+        lines.append(f"Run finished: {selected_run.get('finished_at', '?')}")
+        lines.append(f"Duration:     {selected_run.get('duration_sec', '?')}s")
+        lines.append(f"Trigger:      {selected_run.get('trigger', 'unknown').upper()}")
+        lines.append(f"Status:       {selected_run['overall_status'].upper()}")
+        lines.append("")
+        lines.append("STEPS")
+        lines.append("-" * 50)
+        for s in selected_run.get("steps", []):
+            ok = s["status"] == "success"
+            icon = "OK" if ok else "FAILED"
+            detail = f"{s.get('duration_sec', '?')}s"
+            if "rows" in s:
+                detail += f", {s['rows']} rows"
+            if s.get("dbt_tests_passed") is not None:
+                detail += f", tests={'PASS' if s['dbt_tests_passed'] else 'FAIL'}"
+            if not ok and s.get("error"):
+                detail += f"\n    Error: {s['error']}"
+            lines.append(f"  {s['step']:<12} {icon:<8} ({detail})")
+
+        val = selected_run.get("validation", {})
+        lines.append("")
+        lines.append("VALIDATION")
+        lines.append("-" * 50)
+        lines.append(f"  Status:  {val.get('status', '?').upper()}")
+        lines.append(f"  Passed:  {val.get('passed', 0)}")
+        lines.append(f"  Failed:  {val.get('failed_count', 0)}")
+        if val.get("failed_checks"):
+            for fc in val["failed_checks"]:
+                lines.append(f"  FAIL: {fc['check']} \u2014 {fc['detail']}")
+        if val.get("error"):
+            lines.append(f"  Error: {val['error']}")
+
+        st.code("\n".join(lines), language="text")
+    else:
+        st.info("No run reports yet. Run the pipeline to generate reports.")
+
+    # raw log (collapsed by default — for deep debugging only)
     log_lines = health.get("log_lines", [])
     if log_lines:
-        log_count = st.selectbox(
-            "Lines to show", [50, 100, 200, 500, len(log_lines)],
-            format_func=lambda x: f"Last {x}" if x != len(log_lines) else f"All ({len(log_lines)})",
-            key="log_lines_count",
-        )
-        display_lines = log_lines[-log_count:]
-        st.code("".join(display_lines), language="text")
-    else:
-        st.info("No log file found. Run the pipeline to generate logs.")
+        with st.expander(f"Raw Pipeline Log ({len(log_lines)} lines)", expanded=False):
+            log_count = st.selectbox(
+                "Lines to show", [50, 100, 200, 500, len(log_lines)],
+                format_func=lambda x: f"Last {x}" if x != len(log_lines) else f"All ({len(log_lines)})",
+                key="log_lines_count",
+            )
+            display_lines = log_lines[-log_count:]
+            st.code("".join(display_lines), language="text")

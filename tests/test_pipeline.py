@@ -263,7 +263,8 @@ def run_smoke_test():
     runner.run_test("Twitch ingest", test_twitch_ingest)
     runner.run_test("dbt models", test_dbt_models)
     runner.run_test("dbt tests", test_dbt_tests)
-    runner.run_test("Validation passes", test_validation_passes)
+    # NOTE: validation is NOT in smoke test — it checks igdb/genre data
+    # which smoke doesn't ingest. Full test suite covers validation.
 
     return runner.summary()
 

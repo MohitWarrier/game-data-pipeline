@@ -25,6 +25,13 @@ sys.path.insert(0, PROJECT_ROOT)
 os.environ["PREFECT_LOGGING_LEVEL"] = "WARNING"
 
 from prefect import flow, task
+
+# Prefect hooks into Python's logging and duplicates every line.
+# Silence all prefect loggers so only our custom logger writes output.
+import logging
+for _name in ["prefect", "prefect.flow_runs", "prefect.task_runs"]:
+    logging.getLogger(_name).setLevel(logging.WARNING)
+
 from ingest.logger import get_logger, now_ist
 from ingest.config import load_config
 from ingest.notify import send_alert
@@ -78,17 +85,21 @@ def transform_dbt():
     result = subprocess.run(
         ["dbt", "run"], cwd="game_pulse", capture_output=True, text=True
     )
-    logger.info(f"dbt run output:\n{result.stdout}")
     if result.returncode != 0:
-        logger.error(f"dbt run errors:\n{result.stderr}")
+        logger.error(f"dbt run failed (exit {result.returncode})")
         raise RuntimeError(f"dbt run failed:\n{result.stderr}")
+    # count models from dbt output (e.g. "Completed successfully 5 ...")
+    model_lines = [l for l in result.stdout.splitlines() if "OK" in l or "SUCCESS" in l]
+    logger.info(f"dbt run OK ({len(model_lines)} models built)")
 
     test_result = subprocess.run(
         ["dbt", "test"], cwd="game_pulse", capture_output=True, text=True
     )
-    logger.info(f"dbt test output:\n{test_result.stdout}")
+    test_lines = [l for l in test_result.stdout.splitlines() if "Pass" in l or "Fail" in l]
     if test_result.returncode != 0:
-        logger.warning(f"dbt test failures:\n{test_result.stderr}")
+        logger.warning(f"dbt tests: some failures (exit {test_result.returncode})")
+    else:
+        logger.info(f"dbt tests OK ({len(test_lines)} tests)")
 
     return {
         "source": "dbt",
