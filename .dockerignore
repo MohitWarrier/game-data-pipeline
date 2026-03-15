@@ -1,0 +1,15 @@
+.git
+.github
+__pycache__
+*.pyc
+venv/
+.venv/
+.env
+data/
+logs/
+docs/
+.claude/
+.DS_Store
+Thumbs.db
+*.duckdb
+*.duckdb.wal

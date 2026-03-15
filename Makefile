@@ -110,6 +110,10 @@ dbt:
 	dbt run --project-dir game_pulse
 	dbt test --project-dir game_pulse
 
+dbt-docs:
+	dbt docs generate --project-dir game_pulse
+	dbt docs serve --project-dir game_pulse
+
 # --- Storage ---
 
 archive-dry-run:
@@ -123,4 +127,4 @@ archive:
 logs:
 	tail -50 logs/pipeline.log
 
-.PHONY: help start run serve dashboard test-smoke test test-fresh test-all validate validate-relaxed reset db-counts ingest dbt archive-dry-run archive logs
+.PHONY: help start run serve dashboard test-smoke test test-fresh test-all validate validate-relaxed reset db-counts ingest dbt dbt-docs archive-dry-run archive logs

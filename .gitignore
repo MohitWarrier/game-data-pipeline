@@ -31,8 +31,10 @@ Thumbs.db
 # claude code
 .claude/
 
-# md files apart from README.md
+# docs (personal reference, not pushed to GitHub)
 /docs/
+# but allow screenshots folder (used in README)
+!/docs/screenshots/
 
 # dbt project
 game_pulse/target/

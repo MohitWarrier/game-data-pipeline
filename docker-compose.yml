@@ -1,0 +1,12 @@
+services:
+  game-pulse:
+    build: .
+    ports:
+      - "8501:8501"
+    env_file:
+      - .env
+    volumes:
+      # Persist database and logs between container restarts
+      - ./data:/app/data
+      - ./logs:/app/logs
+    restart: unless-stopped

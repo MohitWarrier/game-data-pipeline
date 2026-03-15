@@ -23,6 +23,7 @@ sys.path.insert(0, PROJECT_ROOT)
 
 from ingest.logger import get_logger, now_ist
 from ingest.config import load_config
+from ingest.notify import send_alert
 from ingest.fetch_twitch import run as run_twitch
 from ingest.fetch_igdb import run as run_igdb
 from ingest.fetch_steam import run as run_steam
@@ -198,6 +199,7 @@ def pipeline():
     logger.info("=" * 60)
 
     save_run_report(report)
+    send_alert(report)
     return report
 
 

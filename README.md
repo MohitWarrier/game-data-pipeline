@@ -1,8 +1,56 @@
-# Project
+# Game Pulse
+
+![CI](https://github.com/MohitWarrier/game-data-pipeline/actions/workflows/ci.yml/badge.svg)
 
 A data engineering pipeline that tracks game popularity over time using Twitch, IGDB, and Steam data. Collects snapshots every 30 minutes, transforms them with dbt, and serves a live analytics dashboard.
 
 Built as a learning project to understand real data engineering — ingestion, transformation, orchestration, validation, storage, and visualization.
+
+## Architecture
+
+```mermaid
+flowchart TB
+    subgraph Sources["Data Sources"]
+        TW[Twitch API<br/>viewers, streams]
+        IG[IGDB API<br/>genre, developer, year]
+        ST[Steam API<br/>player counts]
+    end
+
+    subgraph Ingest["Ingestion Layer"]
+        FT[fetch_twitch.py]
+        FI[fetch_igdb.py]
+        FS[fetch_steam.py]
+    end
+
+    subgraph Raw["Raw Tables (DuckDB)"]
+        RT[raw_twitch_games]
+        RI[raw_igdb_games]
+        RS[raw_steam_players]
+    end
+
+    subgraph Transform["dbt Transform"]
+        STG["Staging Views<br/>clean + filter non-games"]
+        DIM[dim_games<br/>one row per game]
+        FACT[fact_game_snapshots<br/>one row per game per snapshot]
+    end
+
+    subgraph Quality["Quality & Observability"]
+        VAL[56 Validation Checks]
+        RPT[JSON Run Reports]
+        ALT[Email Alerts<br/>on failure]
+    end
+
+    DASH[Streamlit Dashboard<br/>6 tabs]
+    SCHED[Scheduler<br/>every 30 min]
+
+    TW --> FT --> RT
+    IG --> FI --> RI
+    ST --> FS --> RS
+    RT & RI & RS --> STG --> DIM & FACT
+    FACT --> DASH
+    FACT --> VAL --> RPT --> ALT
+    SCHED -.->|triggers| FT & FI & FS
+```
 
 ## Quick Start
 
@@ -61,6 +109,14 @@ streamlit run dashboard/app.py          # in another terminal
 
 The dashboard opens at http://localhost:8501. The pipeline runs immediately, then every 30 minutes. Press Ctrl+C to stop.
 
+### Alternative: Docker
+
+```bash
+docker-compose up
+```
+
+No Python install needed. Runs pipeline + dashboard, persists data between restarts.
+
 ## All Commands
 
 | Command | What it does |
@@ -92,6 +148,30 @@ game-data-pipeline/
   data/                # DuckDB database + Parquet archives
   docs/                # Architecture guide + data science plan
 ```
+
+## Dashboard
+
+The dashboard has 6 tabs:
+
+| Tab | What it shows |
+|-----|--------------|
+| Overview | Top 10 games bar chart, KPI cards, rank movement |
+| Movers | Biggest gainers/losers, volatility scatter plot |
+| Trends | Multi-game comparison, engagement density (detects "one streamer carries a game") |
+| Genres | Market share donut, genre trends over time |
+| Deep Dive | Single game: dual-axis chart, rank history, momentum |
+| Pipeline | Data freshness, run history, validation results, database health |
+
+<!--
+TODO: Add screenshots after collecting data. Run `make start`, wait for 2-3 snapshots, then:
+  1. Screenshot each tab
+  2. Save to docs/screenshots/ (e.g., overview.png, trends.png, pipeline.png)
+  3. Uncomment the lines below
+
+![Overview](docs/screenshots/overview.png)
+![Trends](docs/screenshots/trends.png)
+![Pipeline](docs/screenshots/pipeline.png)
+-->
 
 ## Tech Stack
 
