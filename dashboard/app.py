@@ -184,27 +184,17 @@ def load_pipeline_health():
 
 
 def run_action(cmd, label):
-    """Run a subprocess, log its output to pipeline.log, return result."""
+    """Run a subprocess. Output goes to both the terminal (where make start runs)
+    and is captured for the dashboard. Pipeline runs also write their own logs
+    via the logger, so the terminal always shows what's happening."""
     with st.spinner(f"Running {label}..."):
-        result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+        # Don't capture output — let it flow to the terminal (where make start runs).
+        # The pipeline's own logger writes to console + pipeline.log anyway.
+        result = subprocess.run(cmd, text=True, timeout=300)
 
-    # append output to pipeline log so it's always traceable
-    try:
-        os.makedirs("logs", exist_ok=True)
-        with open(LOG_PATH, "a") as f:
-            f.write(f"\n{'='*60}\n")
-            f.write(f"DASHBOARD ACTION: {label}\n")
-            f.write(f"Time: {datetime.now().strftime('%d/%m/%y %H:%M:%S')}\n")
-            f.write(f"Exit code: {result.returncode}\n")
-            f.write(f"{'='*60}\n")
-            if result.stdout:
-                f.write(result.stdout)
-            if result.stderr:
-                f.write(result.stderr)
-            f.write(f"\n{'='*60}\n\n")
-    except Exception:
-        pass
-
+    # result.stdout/stderr are None when not captured, but that's fine —
+    # the pipeline logs everything via its own logger to pipeline.log + console.
+    # We use a simple wrapper to track exit code.
     return result
 
 
@@ -816,7 +806,11 @@ with tab_health:
             "**Run Pipeline** — fetches fresh data from all sources, "
             "transforms with dbt, and validates. Creates exactly one new snapshot."
         )
-        if st.button("Run Pipeline", use_container_width=True, type="primary"):
+        # check if a run is already in progress
+        lock_exists = os.path.exists("logs/pipeline.lock")
+        if lock_exists:
+            st.warning("A pipeline run is already in progress.")
+        if st.button("Run Pipeline", use_container_width=True, type="primary", disabled=lock_exists):
             result = run_action(
                 ["python", "pipelines/pipeline.py", "--trigger", "dashboard"],
                 "Pipeline (dashboard)",

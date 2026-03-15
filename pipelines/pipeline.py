@@ -55,6 +55,8 @@ logger = get_logger("pipeline")
 RUNS_DIR = os.path.join(PROJECT_ROOT, "logs", "runs")
 os.makedirs(RUNS_DIR, exist_ok=True)
 
+LOCK_FILE = os.path.join(PROJECT_ROOT, "logs", "pipeline.lock")
+
 
 def fmt(dt):
     """Format datetime as dd/mm/yy HH:MM:SS IST."""
@@ -145,10 +147,47 @@ def run_validation():
 #  MAIN FLOW
 # ============================================================
 
+def is_locked():
+    """Check if another pipeline run is in progress."""
+    if not os.path.exists(LOCK_FILE):
+        return False
+    # stale lock check — if lock is older than 10 minutes, it's from a crashed run
+    try:
+        age = time.time() - os.path.getmtime(LOCK_FILE)
+        if age > 600:
+            logger.warning(f"Removing stale lock file ({int(age)}s old — previous run likely crashed)")
+            os.remove(LOCK_FILE)
+            return False
+    except OSError:
+        pass
+    return True
+
+
+def acquire_lock(trigger_label):
+    """Create lock file with run info."""
+    with open(LOCK_FILE, "w") as f:
+        f.write(f"{trigger_label} run started at {fmt(now_ist())}")
+
+
+def release_lock():
+    """Remove lock file."""
+    try:
+        os.remove(LOCK_FILE)
+    except OSError:
+        pass
+
+
 @flow(name="game-pulse")
 def pipeline(trigger="manual"):
-    run_start = now_ist()
     trigger_label = {"scheduled": "SCHEDULED", "manual": "MANUAL", "dashboard": "DASHBOARD"}.get(trigger, "MANUAL")
+
+    # prevent concurrent runs
+    if is_locked():
+        logger.warning(f"{trigger_label} run skipped — another run is already in progress")
+        return {"overall_status": "skipped", "reason": "another run in progress"}
+
+    acquire_lock(trigger_label)
+    run_start = now_ist()
 
     # capture all log lines for this run into a buffer
     _log_buffer = io.StringIO()
@@ -156,91 +195,95 @@ def pipeline(trigger="manual"):
     _buf_handler.setFormatter(logger.handlers[0].formatter if logger.handlers else None)
     logger.addHandler(_buf_handler)
 
-    logger.info("=" * 60)
-    logger.info(f"{trigger_label} PIPELINE RUN STARTED")
-    logger.info(f"  Time: {fmt(run_start)} IST")
-    logger.info("=" * 60)
-
-    config = load_config()
-    steps = []
-
-    for name, task_fn, args in [
-        ("twitch", ingest_twitch, (config,)),
-        ("igdb", ingest_igdb, (config,)),
-        ("steam", ingest_steam, ()),
-    ]:
-        step_start = now_ist()
-        step = {"step": name, "started_at": fmt(step_start)}
-        try:
-            result = task_fn(*args)
-            step["status"] = "success"
-            step["rows"] = result.get("rows", 0)
-            step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
-            logger.info(f"  {name:<10} OK  ({step['rows']} rows, {step['duration_sec']}s)")
-        except Exception as e:
-            step["status"] = "failed"
-            step["error"] = str(e)
-            step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
-            logger.error(f"  {name:<10} FAILED  ({e})")
-        steps.append(step)
-
-    # dbt
-    step_start = now_ist()
-    dbt_step = {"step": "dbt", "started_at": fmt(step_start)}
     try:
-        result = transform_dbt()
-        dbt_step["status"] = "success"
-        dbt_step["dbt_tests_passed"] = result.get("dbt_tests_passed", False)
-        dbt_step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
-        logger.info(f"  dbt        OK  ({dbt_step['duration_sec']}s, tests={'PASS' if dbt_step['dbt_tests_passed'] else 'FAIL'})")
-    except Exception as e:
-        dbt_step["status"] = "failed"
-        dbt_step["error"] = str(e)
-        dbt_step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
-        logger.error(f"  dbt        FAILED  ({e})")
-    steps.append(dbt_step)
+        logger.info("=" * 60)
+        logger.info(f"{trigger_label} PIPELINE RUN STARTED")
+        logger.info(f"  Time: {fmt(run_start)} IST")
+        logger.info("=" * 60)
 
-    # validation
-    logger.info("-" * 60)
-    logger.info("  Running validation checks...")
-    validation = run_validation()
-    logger.info(f"  Validation: {validation['passed']} passed, {validation['failed_count']} failed — {validation['status'].upper()}")
+        config = load_config()
+        steps = []
 
-    # build report
-    run_end = now_ist()
-    duration = round((run_end - run_start).total_seconds(), 1)
-    all_ok = all(s["status"] == "success" for s in steps)
-    overall = "success" if all_ok and validation["status"] == "passed" else "partial" if all_ok else "failed"
+        for name, task_fn, args in [
+            ("twitch", ingest_twitch, (config,)),
+            ("igdb", ingest_igdb, (config,)),
+            ("steam", ingest_steam, ()),
+        ]:
+            step_start = now_ist()
+            step = {"step": name, "started_at": fmt(step_start)}
+            try:
+                result = task_fn(*args)
+                step["status"] = "success"
+                step["rows"] = result.get("rows", 0)
+                step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
+                logger.info(f"  {name:<10} OK  ({step['rows']} rows, {step['duration_sec']}s)")
+            except Exception as e:
+                step["status"] = "failed"
+                step["error"] = str(e)
+                step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
+                logger.error(f"  {name:<10} FAILED  ({e})")
+            steps.append(step)
 
-    report = {
-        "started_at": fmt(run_start),
-        "finished_at": fmt(run_end),
-        "duration_sec": duration,
-        "overall_status": overall,
-        "trigger": trigger_label.lower(),
-        "steps": steps,
-        "validation": validation,
-    }
+        # dbt
+        step_start = now_ist()
+        dbt_step = {"step": "dbt", "started_at": fmt(step_start)}
+        try:
+            result = transform_dbt()
+            dbt_step["status"] = "success"
+            dbt_step["dbt_tests_passed"] = result.get("dbt_tests_passed", False)
+            dbt_step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
+            logger.info(f"  dbt        OK  ({dbt_step['duration_sec']}s, tests={'PASS' if dbt_step['dbt_tests_passed'] else 'FAIL'})")
+        except Exception as e:
+            dbt_step["status"] = "failed"
+            dbt_step["error"] = str(e)
+            dbt_step["duration_sec"] = round((now_ist() - step_start).total_seconds(), 1)
+            logger.error(f"  dbt        FAILED  ({e})")
+        steps.append(dbt_step)
 
-    logger.info("=" * 60)
-    logger.info("PIPELINE RUN COMPLETE")
-    logger.info(f"  Status:   {overall.upper()}")
-    logger.info(f"  Duration: {duration}s")
-    logger.info(f"  Steps:    {sum(1 for s in steps if s['status'] == 'success')}/{len(steps)} succeeded")
-    logger.info(f"  Checks:   {validation['passed']}/{validation['passed'] + validation['failed_count']} passed")
-    if validation["failed_checks"]:
-        for fc in validation["failed_checks"]:
-            logger.warning(f"    FAIL: {fc['check']} — {fc['detail']}")
-    logger.info("=" * 60)
+        # validation
+        logger.info("-" * 60)
+        logger.info("  Running validation checks...")
+        validation = run_validation()
+        logger.info(f"  Validation: {validation['passed']} passed, {validation['failed_count']} failed — {validation['status'].upper()}")
 
-    # capture log lines and clean up buffer handler
-    logger.removeHandler(_buf_handler)
-    report["log"] = _log_buffer.getvalue()
-    _log_buffer.close()
+        # build report
+        run_end = now_ist()
+        duration = round((run_end - run_start).total_seconds(), 1)
+        all_ok = all(s["status"] == "success" for s in steps)
+        overall = "success" if all_ok and validation["status"] == "passed" else "partial" if all_ok else "failed"
 
-    save_run_report(report)
-    send_alert(report)
-    return report
+        report = {
+            "started_at": fmt(run_start),
+            "finished_at": fmt(run_end),
+            "duration_sec": duration,
+            "overall_status": overall,
+            "trigger": trigger_label.lower(),
+            "steps": steps,
+            "validation": validation,
+        }
+
+        logger.info("=" * 60)
+        logger.info("PIPELINE RUN COMPLETE")
+        logger.info(f"  Status:   {overall.upper()}")
+        logger.info(f"  Duration: {duration}s")
+        logger.info(f"  Steps:    {sum(1 for s in steps if s['status'] == 'success')}/{len(steps)} succeeded")
+        logger.info(f"  Checks:   {validation['passed']}/{validation['passed'] + validation['failed_count']} passed")
+        if validation["failed_checks"]:
+            for fc in validation["failed_checks"]:
+                logger.warning(f"    FAIL: {fc['check']} — {fc['detail']}")
+        logger.info("=" * 60)
+
+        # capture log lines and clean up buffer handler
+        logger.removeHandler(_buf_handler)
+        report["log"] = _log_buffer.getvalue()
+        _log_buffer.close()
+
+        save_run_report(report)
+        send_alert(report)
+        return report
+
+    finally:
+        release_lock()
 
 
 # ============================================================

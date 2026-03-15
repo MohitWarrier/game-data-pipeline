@@ -2,9 +2,9 @@
 
 ![CI](https://github.com/MohitWarrier/game-data-pipeline/actions/workflows/ci.yml/badge.svg)
 
-A data engineering pipeline that tracks game popularity over time using Twitch, IGDB, and Steam data. Collects snapshots every 30 minutes, transforms them with dbt, and serves a live analytics dashboard.
+A data engineering pipeline that tracks game popularity over time using Twitch, IGDB, and Steam data. Collects snapshots every 30 minutes, transforms them with dbt and serves a live analytics dashboard.
 
-Built as a learning project to understand real data engineering — ingestion, transformation, orchestration, validation, storage, and visualization.
+Built as a learning project to understand real data engineering - ingestion, transformation, orchestration, validation, storage, and visualization.
 
 ## Architecture
 
@@ -51,6 +51,13 @@ flowchart TB
     FACT --> VAL --> RPT --> ALT
     SCHED -.->|triggers| FT & FI & FS
 ```
+
+### Screenshots
+
+![Overview](docs/screenshots/overview.png)
+![Trends](docs/screenshots/trends.png)
+![Pipeline](docs/screenshots/pipeline.png)
+
 
 ## Quick Start
 
@@ -146,7 +153,7 @@ game-data-pipeline/
   maintenance/         # Hot/cold storage archival
   logs/runs/           # JSON run reports (one per pipeline execution)
   data/                # DuckDB database + Parquet archives
-  docs/                # Architecture guide + data science plan
+  docs/                # Architecture guide + portfolio roadmap
 ```
 
 ## Dashboard
@@ -162,16 +169,6 @@ The dashboard has 6 tabs:
 | Deep Dive | Single game: dual-axis chart, rank history, momentum |
 | Pipeline | Data freshness, run history, validation results, database health |
 
-<!--
-TODO: Add screenshots after collecting data. Run `make start`, wait for 2-3 snapshots, then:
-  1. Screenshot each tab
-  2. Save to docs/screenshots/ (e.g., overview.png, trends.png, pipeline.png)
-  3. Uncomment the lines below
-
-![Overview](docs/screenshots/overview.png)
-![Trends](docs/screenshots/trends.png)
-![Pipeline](docs/screenshots/pipeline.png)
--->
 
 ## Tech Stack
 

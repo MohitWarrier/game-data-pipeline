@@ -33,8 +33,9 @@ Thumbs.db
 
 # docs (personal reference, not pushed to GitHub)
 /docs/
-# but allow screenshots folder (used in README)
+# allow these through:
 !/docs/screenshots/
+!/docs/guide.md
 
 # dbt project
 game_pulse/target/
