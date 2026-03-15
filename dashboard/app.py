@@ -18,6 +18,7 @@ import plotly.express as px
 import plotly.graph_objects as go
 import json
 import glob as globmod
+import subprocess
 from datetime import datetime
 
 st.set_page_config(page_title="Game Pulse", page_icon="\U0001f3ae", layout="wide")
@@ -77,27 +78,33 @@ def fmt_date_short(ts):
 
 @st.cache_data(ttl=60)
 def load_snapshots():
-    con = duckdb.connect(DB_PATH, read_only=True)
-    df = con.execute("""
-        SELECT game_id, game_name, viewer_count, stream_count,
-               rank_at_time, genre, release_year, fetched_at
-        FROM fact_game_snapshots
-        ORDER BY fetched_at DESC, rank_at_time ASC
-    """).df()
-    con.close()
-    return df
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        df = con.execute("""
+            SELECT game_id, game_name, viewer_count, stream_count,
+                   rank_at_time, genre, release_year, fetched_at
+            FROM fact_game_snapshots
+            ORDER BY fetched_at DESC, rank_at_time ASC
+        """).df()
+        con.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=60)
 def load_games():
-    con = duckdb.connect(DB_PATH, read_only=True)
-    df = con.execute("""
-        SELECT game_id, game_name, igdb_id, genre, release_year,
-               developer, steam_app_id
-        FROM dim_games
-    """).df()
-    con.close()
-    return df
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        df = con.execute("""
+            SELECT game_id, game_name, genre, release_year,
+                   developer, steam_app_id
+            FROM dim_games
+        """).df()
+        con.close()
+        return df
+    except Exception:
+        return pd.DataFrame()
 
 
 @st.cache_data(ttl=30)
@@ -124,25 +131,33 @@ def load_pipeline_health():
         info["latest_run"] = None
 
     # --- database health ---
-    con = duckdb.connect(DB_PATH, read_only=True)
-    tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
     info["tables"] = {}
-    for t in tables:
-        info["tables"][t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+    info["first_snapshot"] = None
+    info["latest_snapshot"] = None
+    info["snapshot_count"] = 0
+    try:
+        con = duckdb.connect(DB_PATH, read_only=True)
+        tables = [r[0] for r in con.execute("SHOW TABLES").fetchall()]
+        for t in tables:
+            try:
+                info["tables"][t] = con.execute(f"SELECT COUNT(*) FROM {t}").fetchone()[0]
+            except Exception:
+                info["tables"][t] = -1
 
-    if "fact_game_snapshots" in tables:
-        row = con.execute("""
-            SELECT MIN(fetched_at), MAX(fetched_at), COUNT(DISTINCT fetched_at)
-            FROM fact_game_snapshots
-        """).fetchone()
-        info["first_snapshot"] = row[0]
-        info["latest_snapshot"] = row[1]
-        info["snapshot_count"] = row[2]
-    else:
-        info["first_snapshot"] = None
-        info["latest_snapshot"] = None
-        info["snapshot_count"] = 0
-    con.close()
+        if "fact_game_snapshots" in tables:
+            try:
+                row = con.execute("""
+                    SELECT MIN(fetched_at), MAX(fetched_at), COUNT(DISTINCT fetched_at)
+                    FROM fact_game_snapshots
+                """).fetchone()
+                info["first_snapshot"] = row[0]
+                info["latest_snapshot"] = row[1]
+                info["snapshot_count"] = row[2]
+            except Exception:
+                pass
+        con.close()
+    except Exception:
+        pass
 
     # --- pipeline log tail ---
     info["log_lines"] = []
@@ -724,6 +739,54 @@ with tab_health:
                       delta_color="normal" if failed == 0 else "inverse")
         else:
             st.metric("\u2753 Validation", "No data")
+
+    # --- action buttons ---
+    st.divider()
+    st.subheader("Actions")
+    btn1, btn2, btn3 = st.columns(3)
+
+    with btn1:
+        if st.button("Run Pipeline Now", use_container_width=True, type="primary"):
+            with st.spinner("Running pipeline..."):
+                result = subprocess.run(
+                    ["python", "pipelines/pipeline.py"],
+                    capture_output=True, text=True, timeout=300,
+                )
+            if result.returncode == 0:
+                st.success("Pipeline completed successfully!")
+            else:
+                st.error("Pipeline failed!")
+                st.code(result.stderr[-500:] if result.stderr else "No error output")
+            load_pipeline_health.clear()
+            st.rerun()
+
+    with btn2:
+        if st.button("Run Tests", use_container_width=True):
+            with st.spinner("Running tests..."):
+                result = subprocess.run(
+                    ["python", "-m", "tests.test_pipeline"],
+                    capture_output=True, text=True, timeout=120,
+                )
+            if result.returncode == 0:
+                st.success("All tests passed!")
+            else:
+                st.warning("Some tests failed")
+            with st.expander("Test Output", expanded=True):
+                st.code(result.stdout + result.stderr, language="text")
+
+    with btn3:
+        if st.button("Run Validation", use_container_width=True):
+            with st.spinner("Running validation checks..."):
+                result = subprocess.run(
+                    ["python", "-m", "tests.validate_pipeline"],
+                    capture_output=True, text=True, timeout=60,
+                )
+            if result.returncode == 0:
+                st.success("Validation complete!")
+            else:
+                st.warning("Validation had issues")
+            with st.expander("Validation Output", expanded=True):
+                st.code(result.stdout + result.stderr, language="text")
 
     # --- row 2: last run step-by-step breakdown ---
     if latest_run:

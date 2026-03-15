@@ -15,7 +15,7 @@ help:
 	@echo "  make dashboard    Launch dashboard only"
 	@echo "  make test         Run full test suite"
 	@echo "  make test-smoke   Quick smoke test (~30s)"
-	@echo "  make validate     Run 56 data quality checks"
+	@echo "  make validate     Run data quality checks"
 	@echo "  make reset        Wipe database and start fresh"
 	@echo "  make db-counts    Show row counts for all tables"
 	@echo "  make logs         Show recent pipeline logs"

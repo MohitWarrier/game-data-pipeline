@@ -38,10 +38,11 @@ jobs:
             outputs:
               dev:
                 type: duckdb
-                path: data/game_pulse.duckdb
+                path: ../data/game_pulse.duckdb
                 threads: 1
             target: dev
           EOF
+          sed -i 's/^          //' ~/.dbt/profiles.yml
 
       - name: Run smoke tests
         run: python -m tests.test_pipeline --test smoke
